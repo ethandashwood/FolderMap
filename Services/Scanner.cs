@@ -10,7 +10,7 @@ public static class Scanner
     private static readonly EnumerationOptions Options = new()
     {
         IgnoreInaccessible = true,     // skip folders we don't have permission for
-        RecurseSubdirectories = false, // we recurse ourselves so we can total sizes
+        RecurseSubdirectories = false, // we walk the tree ourselves so we can total sizes
         ReturnSpecialDirectories = false,
         AttributesToSkip = 0,          // include hidden/system files - they still use space
     };
@@ -32,33 +32,81 @@ public static class Scanner
         }
     }
 
+    /// <summary>
+    /// Turn what the user typed into the folder to scan. "C:" on its own means "the current
+    /// folder on drive C" to Windows, but people always mean the whole drive.
+    /// </summary>
+    public static string NormalizeRoot(string path)
+    {
+        path = path.Trim().Trim('"');
+        if (path.Length == 2 && path[1] == ':' && char.IsLetter(path[0]))
+            path += Path.DirectorySeparatorChar;
+
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        if (full.Length == 2 && full[1] == ':') full += Path.DirectorySeparatorChar; // keep "C:\"
+        return full;
+    }
+
     public static FolderNode Scan(string rootPath, IProgress<ScanProgress>? progress, CancellationToken token)
     {
-        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
-        // "C:" on its own means "current dir on C", so keep the slash for drive roots.
-        if (full.Length == 2 && full[1] == ':') full += Path.DirectorySeparatorChar;
-
+        var full = NormalizeRoot(rootPath);
         var root = new FolderNode(full, null) { IsExpanded = true };
         var state = new State { Progress = progress, Token = token };
-        var dir = new DirectoryInfo(full);
-        root.Modified = dir.LastWriteTime;
+        var rootDir = new DirectoryInfo(full);
+        root.Modified = rootDir.LastWriteTime;
 
-        ScanFolder(root, dir, state);
+        // Phase 1: read every folder, parents before children. A loop with our own stack
+        // (instead of recursion) means extremely deep folder trees can't crash the app.
+        var visitOrder = new List<(FolderNode Node, List<FolderNode> SubFolders)>();
+        var pending = new Stack<(FolderNode Node, DirectoryInfo Dir)>();
+        pending.Push((root, rootDir));
+
+        while (pending.Count > 0)
+        {
+            token.ThrowIfCancellationRequested();
+            var (node, dir) = pending.Pop();
+            var subFolders = ReadFolder(node, dir, state, pending);
+            visitOrder.Add((node, subFolders));
+        }
+
+        // Phase 2: total sizes bottom-up. Children were visited after their parents,
+        // so walking the list backwards always finishes children first.
+        for (int i = visitOrder.Count - 1; i >= 0; i--)
+        {
+            var (node, subFolders) = visitOrder[i];
+            long size = node.Files.Sum(f => f.Size);
+            long files = node.Files.Count;
+            foreach (var sub in subFolders)
+            {
+                size += sub.Size;
+                files += sub.FileCount;
+            }
+
+            // Largest first everywhere, so the tree and charts read naturally.
+            subFolders.Sort((a, b) => b.Size.CompareTo(a.Size));
+            foreach (var sub in subFolders) node.Folders.Add(sub);
+            node.Files.Sort((a, b) => b.Size.CompareTo(a.Size));
+
+            node.Size = size;
+            node.FileCount = files;
+        }
+
         state.Report(force: true);
         return root;
     }
 
-    private static void ScanFolder(FolderNode node, DirectoryInfo dir, State s)
+    private static List<FolderNode> ReadFolder(FolderNode node, DirectoryInfo dir, State s,
+        Stack<(FolderNode, DirectoryInfo)> pending)
     {
-        s.Token.ThrowIfCancellationRequested();
-
         var subFolders = new List<FolderNode>();
-        long size = 0, files = 0;
-
+        int seen = 0;
         try
         {
             foreach (var info in dir.EnumerateFileSystemInfos("*", Options))
             {
+                // Check for Cancel inside big folders too, not just between folders.
+                if (++seen % 1000 == 0) s.Token.ThrowIfCancellationRequested();
+
                 if (info is DirectoryInfo d)
                 {
                     // Skip junctions and symbolic links (e.g. "Application Data") - following them
@@ -68,10 +116,8 @@ public static class Scanner
                         continue;
 
                     var child = new FolderNode(d.Name, node) { Modified = d.LastWriteTime };
-                    ScanFolder(child, d, s);
                     subFolders.Add(child);
-                    size += child.Size;
-                    files += child.FileCount;
+                    pending.Push((child, d));
                 }
                 else if (info is FileInfo f)
                 {
@@ -79,8 +125,6 @@ public static class Scanner
                     try { length = f.Length; } catch { length = 0; }
 
                     node.Files.Add(new FileNode(f.Name, node, length, f.LastWriteTime, f.Attributes));
-                    size += length;
-                    files++;
                     s.Files++;
                     s.Bytes += length;
                 }
@@ -89,16 +133,9 @@ public static class Scanner
         catch (UnauthorizedAccessException) { node.AccessDenied = true; }
         catch (IOException) { node.AccessDenied = true; }
 
-        // Largest first everywhere, so the tree and charts read naturally.
-        subFolders.Sort((a, b) => b.Size.CompareTo(a.Size));
-        foreach (var sub in subFolders) node.Folders.Add(sub);
-        node.Files.Sort((a, b) => b.Size.CompareTo(a.Size));
-
-        node.Size = size;
-        node.FileCount = files;
-
         s.Folders++;
         s.Current = dir.FullName;
         s.Report();
+        return subFolders;
     }
 }

@@ -65,6 +65,53 @@ public partial class MainViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(SelectedText), nameof(CanActOnSelection))]
     private FsNode? _selectedEntry;
 
+    /// <summary>True when the selected folder contains code (or the selected file is code).</summary>
+    [ObservableProperty]
+    private bool _canAnalyseCode;
+
+    private CancellationTokenSource? _codeCheckCts;
+
+    /// <summary>The background "does this folder contain code?" check (exposed so tests can wait for it).</summary>
+    internal Task CodeCheck { get; private set; } = Task.CompletedTask;
+
+    // Checking a big folder means walking its whole tree, so it runs in the background and the
+    // button enables when it's done, instead of freezing the window on every click.
+    partial void OnSelectedEntryChanged(FsNode? value)
+    {
+        _codeCheckCts?.Cancel(); // stop checking the previous selection
+        _codeCheckCts = null;
+
+        if (value is not FolderNode folder)
+        {
+            CanAnalyseCode = value is FileNode file && CodeAnalyzer.IsCodeFile(file.Name);
+            CodeCheck = Task.CompletedTask;
+            return;
+        }
+
+        CanAnalyseCode = false;
+        var cts = _codeCheckCts = new CancellationTokenSource();
+        CodeCheck = CheckForCodeAsync(folder, cts.Token);
+    }
+
+    private async Task CheckForCodeAsync(FolderNode folder, CancellationToken token)
+    {
+        bool hasCode;
+        try
+        {
+            hasCode = await Task.Run(() => CodeAnalyzer.ContainsCode(folder, token), token);
+        }
+        catch (OperationCanceledException)
+        {
+            return; // the selection changed before we finished
+        }
+        catch (InvalidOperationException)
+        {
+            return; // the tree changed underneath us (e.g. a file was moved) - leave the button off
+        }
+        if (!token.IsCancellationRequested && ReferenceEquals(SelectedEntry, folder))
+            CanAnalyseCode = hasCode;
+    }
+
     public string SelectedText => SelectedEntry is null
         ? "Nothing selected"
         : $"{SelectedEntry.FullPath}   ({SelectedEntry.SizeText})";
@@ -90,6 +137,25 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _duplicateSummary = "Finds files with identical contents. Online-only OneDrive files are skipped so nothing gets downloaded.";
 
     // =====================================================================
+    // Safe number handling (typing a giant number mustn't crash anything)
+    // =====================================================================
+
+    private const decimal MaxMegabytes = 100_000_000m; // 100 TB - bigger than any real file
+    private const decimal MaxDays = 36_500m;           // 100 years
+
+    internal static long MegabytesToBytes(decimal? megabytes)
+    {
+        if (megabytes is not { } mb || mb <= 0) return 0;
+        return (long)(Math.Min(mb, MaxMegabytes) * 1024 * 1024);
+    }
+
+    internal static DateTime? ModifiedAfter(decimal? days)
+    {
+        if (days is not { } d || d <= 0) return null;
+        return DateTime.Now.AddDays(-(double)Math.Min(d, MaxDays));
+    }
+
+    // =====================================================================
     // Scanning
     // =====================================================================
 
@@ -104,9 +170,10 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        _cts = new CancellationTokenSource();
+        var token = NewOperationToken();
         IsBusy = true;
-        ResetResults();
+        // The previous results stay on screen until the new scan finishes, so cancelling
+        // a rescan doesn't lose them.
 
         var progress = new Progress<ScanProgress>(p =>
             Status = $"Scanning… {p.Folders:N0} folders, {p.Files:N0} files, {Format.Bytes(p.Bytes)}   {p.Current}");
@@ -114,12 +181,12 @@ public partial class MainViewModel : ObservableObject
         try
         {
             var timer = Stopwatch.StartNew();
-            var token = _cts.Token;
             var root = await Task.Run(() => Scanner.Scan(path, progress, token), token);
 
             // Summaries are computed off the UI thread too.
-            var (large, types, denied) = await Task.Run(() => BuildSummaries(root));
+            var (large, types, denied) = await Task.Run(() => BuildSummaries(root), token);
 
+            ResetResults();
             Root = root;
             RootItems.Add(root);
             CurrentFolder = root;
@@ -132,7 +199,7 @@ public partial class MainViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
-            Status = "Scan cancelled.";
+            Status = Root is null ? "Scan cancelled." : "Scan cancelled. Still showing the previous scan.";
         }
         catch (Exception ex)
         {
@@ -146,6 +213,14 @@ public partial class MainViewModel : ObservableObject
 
     [RelayCommand]
     private void Cancel() => _cts?.Cancel();
+
+    /// <summary>A fresh cancellation token for a scan or duplicate check (disposing the old one).</summary>
+    private CancellationToken NewOperationToken()
+    {
+        _cts?.Dispose();
+        _cts = new CancellationTokenSource();
+        return _cts.Token;
+    }
 
     private void ResetResults()
     {
@@ -222,10 +297,8 @@ public partial class MainViewModel : ObservableObject
             .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries)
             .Select(e => e.StartsWith('.') ? e.ToLowerInvariant() : "." + e.ToLowerInvariant())
             .ToHashSet();
-        long minBytes = (long)((MinSizeMb ?? 0) * 1024 * 1024);
-        DateTime? after = ModifiedWithinDays.HasValue && ModifiedWithinDays.Value > 0
-            ? DateTime.Now.AddDays(-(double)ModifiedWithinDays.Value)
-            : null;
+        long minBytes = MegabytesToBytes(MinSizeMb);
+        DateTime? after = ModifiedAfter(ModifiedWithinDays);
         bool includeFolders = IncludeFolders && extensions.Count == 0; // folders have no extension
 
         IsBusy = true;
@@ -245,9 +318,9 @@ public partial class MainViewModel : ObservableObject
                 ? $"{matches.Count:N0} matches ({Format.Bytes(totalSize)} of files). Showing the largest {SearchLimit:N0}."
                 : $"{matches.Count:N0} matches ({Format.Bytes(totalSize)} of files).";
         }
-        catch (ArgumentException ex)
+        catch (Exception ex)
         {
-            SearchSummary = $"Invalid search pattern: {ex.Message}";
+            SearchSummary = $"Search failed: {ex.Message}";
         }
         finally
         {
@@ -282,9 +355,8 @@ public partial class MainViewModel : ObservableObject
         }
 
         var root = Root;
-        long minBytes = (long)((DuplicateMinMb ?? 0) * 1024 * 1024);
-        _cts = new CancellationTokenSource();
-        var token = _cts.Token;
+        long minBytes = MegabytesToBytes(DuplicateMinMb);
+        var token = NewOperationToken();
         IsBusy = true;
         var progress = new Progress<string>(s => Status = s);
 
@@ -312,6 +384,11 @@ public partial class MainViewModel : ObservableObject
         {
             Status = "Duplicate check cancelled.";
         }
+        catch (Exception ex)
+        {
+            DuplicateSummary = $"Duplicate check failed: {ex.Message}";
+            Status = "Duplicate check failed.";
+        }
         finally
         {
             IsBusy = false;
@@ -332,7 +409,13 @@ public partial class MainViewModel : ObservableObject
 
         SearchResults = new ObservableCollection<FsNode>(SearchResults.Where(n => !Gone(n)));
         LargeFiles = new ObservableCollection<FileNode>(LargeFiles.Where(n => !Gone(n)));
-        Duplicates = new ObservableCollection<DuplicateRow>(Duplicates.Where(r => !Gone(r.File)));
+        // A set with only one copy left isn't a duplicate any more, so drop it. That way the
+        // last remaining copy can't be recycled by mistake from this list.
+        Duplicates = new ObservableCollection<DuplicateRow>(Duplicates
+            .Where(r => !Gone(r.File))
+            .GroupBy(r => r.Group)
+            .Where(g => g.Count() > 1)
+            .SelectMany(g => g));
 
         bool currentGone = CurrentFolder != null && Gone(CurrentFolder);
         bool selectionGone = SelectedEntry != null && Gone(SelectedEntry);

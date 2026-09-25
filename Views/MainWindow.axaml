@@ -1,11 +1,23 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:c="using:FolderMap.Controls"
+        xmlns:m="using:FolderMap.Models"
         x:Class="FolderMap.Views.MainWindow"
         Title="FolderMap"
-        Width="1320" Height="860" MinWidth="900" MinHeight="600">
+        Width="1320" Height="860" MinWidth="480" MinHeight="420"
+        WindowStartupLocation="CenterScreen">
 
   <Window.Styles>
+    <!-- Smaller tab headers so all five fit (they wrap onto two rows if needed) -->
+    <Style Selector="TabItem">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="MinHeight" Value="36" />
+      <Setter Property="Padding" Value="12,0" />
+    </Style>
+    <!-- "compact" is added to the window by code-behind when it gets narrow -->
+    <Style Selector="Window.compact TextBlock.hint">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
     <!-- Keep tree expansion in sync with FolderNode.IsExpanded -->
     <Style Selector="TreeViewItem">
       <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
@@ -47,19 +59,28 @@
 
     <!-- ===== Bottom: actions for the selected file/folder ===== -->
     <Border DockPanel.Dock="Bottom" Padding="12,8" BorderThickness="0,1,0,0" BorderBrush="#40808080">
-      <Grid ColumnDefinitions="Auto,*,Auto">
+      <!-- On narrow windows the code-behind moves the buttons onto a second row, where they wrap. -->
+      <Grid x:Name="SelectionBar" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto">
         <TextBlock Text="Selected" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,0" />
         <TextBlock Grid.Column="1" Text="{Binding SelectedText}" VerticalAlignment="Center"
-                   TextTrimming="CharacterEllipsis" />
-        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" Margin="10,0,0,0"
-                    IsEnabled="{Binding CanActOnSelection}">
+                   TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding SelectedText}" />
+        <WrapPanel x:Name="ActionButtons" Grid.Column="2" Orientation="Horizontal" Margin="10,0,0,0"
+                   IsEnabled="{Binding CanActOnSelection}">
+          <WrapPanel.Styles>
+            <Style Selector="Button">
+              <Setter Property="Margin" Value="0,2,6,2" />
+            </Style>
+          </WrapPanel.Styles>
           <Button Content="Open" Click="OnOpenClick" />
           <Button Content="Show in Explorer" Click="OnRevealClick" />
           <Button Content="Show in tree" Click="OnGoToClick" />
           <Button Content="Rename…" Click="OnRenameClick" />
           <Button Content="Move to…" Click="OnMoveClick" />
           <Button Content="Recycle" Click="OnRecycleClick" />
-        </StackPanel>
+          <Button Content="Analyse code" Click="OnAnalyseCodeClick" Classes="accent"
+                  IsEnabled="{Binding CanAnalyseCode}"
+                  ToolTip.Tip="Open a map of how the methods and variables in this code connect" />
+        </WrapPanel>
       </Grid>
     </Border>
 
@@ -67,12 +88,15 @@
 
       <!-- ================= Explorer ================= -->
       <TabItem Header="Explorer">
-        <Grid ColumnDefinitions="340,5,*">
+        <!-- Column widths are switched by code-behind: tree beside the chart when wide,
+             hidden behind the "Folders" toggle when narrow. -->
+        <Grid x:Name="ExplorerGrid" ColumnDefinitions="320,5,*">
 
           <TreeView x:Name="FolderTree" ItemsSource="{Binding RootItems}"
                     SelectionChanged="OnTreeSelectionChanged">
-            <TreeView.ItemTemplate>
-              <TreeDataTemplate ItemsSource="{Binding Folders}">
+            <!-- Folders show their largest subfolders; a very long branch ends in a "more" line. -->
+            <TreeView.DataTemplates>
+              <TreeDataTemplate DataType="m:FolderNode" ItemsSource="{Binding TreeChildren}">
                 <Grid ColumnDefinitions="Auto,Auto,Auto" ToolTip.Tip="{Binding FullPath}">
                   <TextBlock Text="{Binding Name}" VerticalAlignment="Center" MaxWidth="200"
                              TextTrimming="CharacterEllipsis" />
@@ -82,28 +106,36 @@
                                Width="44" MinWidth="44" Height="5" MinHeight="5" VerticalAlignment="Center" />
                 </Grid>
               </TreeDataTemplate>
-            </TreeView.ItemTemplate>
+              <DataTemplate DataType="m:MoreFoldersItem">
+                <TextBlock Text="{Binding Text}" FontStyle="Italic" Opacity="0.7" />
+              </DataTemplate>
+            </TreeView.DataTemplates>
           </TreeView>
 
-          <GridSplitter Grid.Column="1" ResizeDirection="Columns" />
+          <GridSplitter x:Name="TreeSplitter" Grid.Column="1" ResizeDirection="Columns" />
 
-          <Grid Grid.Column="2" RowDefinitions="Auto,*,5,260">
+          <!-- Chart and contents list share the height proportionally, so both stay visible. -->
+          <Grid Grid.Column="2" RowDefinitions="Auto,3*,5,2*">
 
-            <Grid ColumnDefinitions="Auto,*,Auto" Margin="10,8">
-              <Button Content="Up a level" Command="{Binding GoUpCommand}" />
-              <TextBlock Grid.Column="1" Text="{Binding CurrentPathText}" FontWeight="SemiBold"
-                         VerticalAlignment="Center" Margin="12,0" TextTrimming="CharacterEllipsis" />
-              <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
-                <TextBlock Text="Scroll to zoom · drag to pan · double-click opens · right-click goes up" Opacity="0.6"
-                           FontSize="12" VerticalAlignment="Center" />
-                <ComboBox SelectedIndex="{Binding ChartMode, Mode=TwoWay}" Width="130">
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto" Margin="10,8">
+              <ToggleButton x:Name="TreeToggle" Content="Folders" Margin="0,0,8,0" IsVisible="False"
+                            IsCheckedChanged="OnTreeToggleChanged" />
+              <Button Grid.Column="1" Content="Up a level" Command="{Binding GoUpCommand}" />
+              <TextBlock Grid.Column="2" Text="{Binding CurrentPathText}" FontWeight="SemiBold"
+                         VerticalAlignment="Center" Margin="12,0" TextTrimming="CharacterEllipsis"
+                         ToolTip.Tip="{Binding CurrentPathText}" />
+              <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="8">
+                <TextBlock Classes="hint" Text="Scroll to zoom · drag to pan · double-click opens · right-click goes up"
+                           Opacity="0.6" FontSize="12" VerticalAlignment="Center" />
+                <ComboBox SelectedIndex="{Binding ChartMode, Mode=TwoWay}" Width="120"
+                          ToolTip.Tip="Scroll to zoom · drag to pan · double-click opens · right-click goes up">
                   <ComboBoxItem Content="Treemap" />
                   <ComboBoxItem Content="Sunburst" />
                 </ComboBox>
               </StackPanel>
             </Grid>
 
-            <Panel Grid.Row="1" Margin="10,0,10,6">
+            <Panel Grid.Row="1" Margin="10,0,10,6" MinHeight="120">
               <c:TreemapControl Root="{Binding CurrentFolder, Mode=TwoWay}"
                                 SelectedNode="{Binding SelectedEntry, Mode=TwoWay}"
                                 Version="{Binding ChartVersion}"
@@ -116,12 +148,12 @@
 
             <GridSplitter Grid.Row="2" ResizeDirection="Rows" />
 
-            <DataGrid Grid.Row="3" ItemsSource="{Binding CurrentItems}"
+            <DataGrid Grid.Row="3" ItemsSource="{Binding CurrentItems}" MinHeight="100"
                       IsReadOnly="True" AutoGenerateColumns="False" CanUserSortColumns="True"
                       CanUserResizeColumns="True" SelectionMode="Single" GridLinesVisibility="Horizontal"
                       SelectionChanged="OnGridSelectionChanged" DoubleTapped="OnGridDoubleTapped">
               <DataGrid.Columns>
-                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*" />
+                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*" MinWidth="160" />
                 <DataGridTextColumn Header="Type" Binding="{Binding Kind}" Width="90" />
                 <DataGridTextColumn Header="Size" Binding="{Binding SizeText}" SortMemberPath="Size" Width="100" />
                 <DataGridTemplateColumn Header="% of folder" SortMemberPath="Size" Width="150">
@@ -160,12 +192,12 @@
             </StackPanel>
             <StackPanel Margin="0,0,14,10">
               <TextBlock Classes="label" Text="At least (MB)" />
-              <NumericUpDown Value="{Binding MinSizeMb, Mode=TwoWay}" Minimum="0" Increment="10"
+              <NumericUpDown Value="{Binding MinSizeMb, Mode=TwoWay}" Minimum="0" Maximum="100000000" Increment="10"
                              FormatString="0.##" Width="150" />
             </StackPanel>
             <StackPanel Margin="0,0,14,10">
               <TextBlock Classes="label" Text="Modified in the last N days" />
-              <NumericUpDown Value="{Binding ModifiedWithinDays, Mode=TwoWay}" Minimum="0" Increment="7"
+              <NumericUpDown Value="{Binding ModifiedWithinDays, Mode=TwoWay}" Minimum="0" Maximum="36500" Increment="7"
                              FormatString="0" Width="150" />
             </StackPanel>
             <CheckBox Content="Include folders" IsChecked="{Binding IncludeFolders, Mode=TwoWay}"
@@ -173,17 +205,18 @@
             <Button Content="Search" Classes="accent" MinWidth="90" VerticalAlignment="Bottom" Margin="0,0,0,10"
                     Command="{Binding SearchCommand}" />
           </WrapPanel>
-          <TextBlock DockPanel.Dock="Top" Text="{Binding SearchSummary}" Margin="0,0,0,8" Opacity="0.8" />
+          <TextBlock DockPanel.Dock="Top" Text="{Binding SearchSummary}" Margin="0,0,0,8" Opacity="0.8"
+                     TextWrapping="Wrap" />
           <DataGrid ItemsSource="{Binding SearchResults}"
                     IsReadOnly="True" AutoGenerateColumns="False" CanUserSortColumns="True"
                     SelectionMode="Single" GridLinesVisibility="Horizontal"
                     SelectionChanged="OnGridSelectionChanged" DoubleTapped="OnGridDoubleTapped">
             <DataGrid.Columns>
-              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
+              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" MinWidth="160" />
               <DataGridTextColumn Header="Type" Binding="{Binding Kind}" Width="90" />
               <DataGridTextColumn Header="Size" Binding="{Binding SizeText}" SortMemberPath="Size" Width="100" />
               <DataGridTextColumn Header="Modified" Binding="{Binding ModifiedText}" SortMemberPath="Modified" Width="140" />
-              <DataGridTextColumn Header="Folder" Binding="{Binding ParentPath}" Width="3*" />
+              <DataGridTextColumn Header="Folder" Binding="{Binding ParentPath}" Width="3*" MinWidth="200" />
             </DataGrid.Columns>
           </DataGrid>
         </DockPanel>
@@ -192,18 +225,18 @@
       <!-- ================= Large files ================= -->
       <TabItem Header="Largest files">
         <DockPanel Margin="12">
-          <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8" Opacity="0.8"
+          <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8" Opacity="0.8" TextWrapping="Wrap"
                      Text="The 1,000 biggest files in the scanned folder. Double-click one to jump to it in the Explorer tab." />
           <DataGrid ItemsSource="{Binding LargeFiles}"
                     IsReadOnly="True" AutoGenerateColumns="False" CanUserSortColumns="True"
                     SelectionMode="Single" GridLinesVisibility="Horizontal"
                     SelectionChanged="OnGridSelectionChanged" DoubleTapped="OnGridDoubleTapped">
             <DataGrid.Columns>
-              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
+              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" MinWidth="160" />
               <DataGridTextColumn Header="Type" Binding="{Binding Kind}" Width="90" />
               <DataGridTextColumn Header="Size" Binding="{Binding SizeText}" SortMemberPath="Size" Width="100" />
               <DataGridTextColumn Header="Modified" Binding="{Binding ModifiedText}" SortMemberPath="Modified" Width="140" />
-              <DataGridTextColumn Header="Folder" Binding="{Binding ParentPath}" Width="3*" />
+              <DataGridTextColumn Header="Folder" Binding="{Binding ParentPath}" Width="3*" MinWidth="200" />
             </DataGrid.Columns>
           </DataGrid>
         </DockPanel>
@@ -212,7 +245,7 @@
       <!-- ================= File types ================= -->
       <TabItem Header="File types">
         <DockPanel Margin="12">
-          <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8" Opacity="0.8"
+          <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8" Opacity="0.8" TextWrapping="Wrap"
                      Text="How much space each kind of file uses. Tip: search an extension in the Search tab to see every file of that type." />
           <DataGrid ItemsSource="{Binding FileTypes}"
                     IsReadOnly="True" AutoGenerateColumns="False" CanUserSortColumns="True"
@@ -221,7 +254,7 @@
               <DataGridTextColumn Header="Type" Binding="{Binding Extension}" Width="140" />
               <DataGridTextColumn Header="Files" Binding="{Binding CountText}" SortMemberPath="Count" Width="110" />
               <DataGridTextColumn Header="Total size" Binding="{Binding SizeText}" SortMemberPath="TotalSize" Width="120" />
-              <DataGridTemplateColumn Header="Share of total" SortMemberPath="TotalSize" Width="*">
+              <DataGridTemplateColumn Header="Share of total" SortMemberPath="TotalSize" Width="*" MinWidth="160">
                 <DataGridTemplateColumn.CellTemplate>
                   <DataTemplate>
                     <Grid ColumnDefinitions="*,60" Margin="8,0">
@@ -240,15 +273,15 @@
       <!-- ================= Duplicates ================= -->
       <TabItem Header="Duplicates">
         <DockPanel Margin="12">
-          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,0,0,10">
-            <StackPanel>
+          <WrapPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
+            <StackPanel Margin="0,0,12,6">
               <TextBlock Classes="label" Text="Ignore files smaller than (MB)" />
-              <NumericUpDown Value="{Binding DuplicateMinMb, Mode=TwoWay}" Minimum="0" Increment="1"
+              <NumericUpDown Value="{Binding DuplicateMinMb, Mode=TwoWay}" Minimum="0" Maximum="100000000" Increment="1"
                              FormatString="0.##" Width="170" />
             </StackPanel>
             <Button Content="Find duplicates" Classes="accent" VerticalAlignment="Bottom"
-                    Command="{Binding FindDuplicatesCommand}" IsEnabled="{Binding IsIdle}" />
-          </StackPanel>
+                    Command="{Binding FindDuplicatesCommand}" IsEnabled="{Binding IsIdle}" Margin="0,0,0,6" />
+          </WrapPanel>
           <TextBlock DockPanel.Dock="Top" Text="{Binding DuplicateSummary}" Margin="0,0,0,8" Opacity="0.8"
                      TextWrapping="Wrap" />
           <DataGrid ItemsSource="{Binding Duplicates}"
@@ -257,10 +290,10 @@
                     SelectionChanged="OnGridSelectionChanged" DoubleTapped="OnGridDoubleTapped">
             <DataGrid.Columns>
               <DataGridTextColumn Header="Set" Binding="{Binding Group}" Width="60" />
-              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
+              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" MinWidth="160" />
               <DataGridTextColumn Header="Size" Binding="{Binding SizeText}" SortMemberPath="Size" Width="100" />
               <DataGridTextColumn Header="Modified" Binding="{Binding ModifiedText}" SortMemberPath="Modified" Width="140" />
-              <DataGridTextColumn Header="Folder" Binding="{Binding Folder}" Width="3*" />
+              <DataGridTextColumn Header="Folder" Binding="{Binding Folder}" Width="3*" MinWidth="200" />
             </DataGrid.Columns>
           </DataGrid>
         </DockPanel>

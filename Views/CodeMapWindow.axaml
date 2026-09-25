@@ -1,0 +1,178 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="using:FolderMap.Controls"
+        x:Class="FolderMap.Views.CodeMapWindow"
+        Title="{Binding Title}"
+        Width="1280" Height="820" MinWidth="560" MinHeight="420"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel>
+
+    <!-- ===== Top: what was analysed + view options ===== -->
+    <Border DockPanel.Dock="Top" Padding="12,8"
+            Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+          <TextBlock Text="{Binding FolderPath}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                     ToolTip.Tip="{Binding FolderPath}" />
+          <TextBlock Text="{Binding Summary}" FontSize="12" Opacity="0.75" TextTrimming="CharacterEllipsis"
+                     ToolTip.Tip="{Binding Summary}" />
+        </StackPanel>
+        <WrapPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right" MaxWidth="720">
+          <ComboBox SelectedIndex="{Binding FocusMode, Mode=TwoWay}" Width="200" Margin="0,2,10,2"
+                    ToolTip.Tip="Show the whole program, or only what's connected to the selected item">
+            <ComboBoxItem Content="Show everything" />
+            <ComboBoxItem Content="Selected + neighbours" />
+            <ComboBoxItem Content="Selected + 2 steps" />
+          </ComboBox>
+          <CheckBox Content="Methods" IsChecked="{Binding ShowMethods, Mode=TwoWay}" Margin="0,2,10,2" />
+          <CheckBox Content="Variables" IsChecked="{Binding ShowVariables, Mode=TwoWay}" Margin="0,2,10,2" />
+          <CheckBox Content="Classes" IsChecked="{Binding ShowClasses, Mode=TwoWay}" Margin="0,2,10,2" />
+          <CheckBox Content="Unconnected" IsChecked="{Binding ShowUnconnected, Mode=TwoWay}" Margin="0,2,10,2"
+                    ToolTip.Tip="Also show things nothing else uses (and that use nothing)" />
+          <Button Content="Fit to window" Click="OnFitClick" Margin="0,2,0,2" />
+        </WrapPanel>
+      </Grid>
+    </Border>
+
+    <!-- ===== Bottom: status ===== -->
+    <Border DockPanel.Dock="Bottom" Padding="12,5"
+            Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Text="{Binding ViewNote}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                   ToolTip.Tip="{Binding ViewNote}" />
+        <TextBlock Grid.Column="1" Text="{Binding Status}" Opacity="0.7" Margin="12,0,0,0" MaxWidth="420"
+                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Status}" />
+      </Grid>
+    </Border>
+
+    <!-- Columns: list | graph | details. Code-behind hides/narrows the side panels on small windows. -->
+    <Grid x:Name="MainGrid" ColumnDefinitions="260,5,*,5,320">
+
+      <!-- ===== Left: searchable list of everything found ===== -->
+      <DockPanel x:Name="ListPanel" Margin="8">
+        <ComboBox DockPanel.Dock="Top" SelectedIndex="{Binding ListMode, Mode=TwoWay}"
+                  HorizontalAlignment="Stretch" Margin="0,0,0,6"
+                  ToolTip.Tip="Possibly unused: methods nothing calls, and variables nothing reads">
+          <ComboBoxItem Content="Everything" />
+          <ComboBoxItem Content="{Binding UnusedLabel}" />
+        </ComboBox>
+        <TextBox DockPanel.Dock="Top" Text="{Binding SearchText, Mode=TwoWay}" Margin="0,0,0,6"
+                 Watermark="Find a method, variable or file…" />
+        <ListBox x:Name="SymbolList" ItemsSource="{Binding ListItems}"
+                 SelectionChanged="OnSymbolListSelectionChanged">
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <StackPanel ToolTip.Tip="{Binding DisplayName}">
+                <TextBlock Text="{Binding ShortName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Subtitle}" FontSize="11" Opacity="0.7" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding UnusedReason, StringFormat='⚠ {0}'}" IsVisible="{Binding IsPossiblyUnused}"
+                           FontSize="11" Foreground="#E09A3A" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+
+      <GridSplitter x:Name="LeftSplitter" Grid.Column="1" ResizeDirection="Columns" />
+
+      <!-- ===== Middle: the graph ===== -->
+      <Panel Grid.Column="2" MinWidth="200">
+        <c:CodeGraphControl x:Name="Graph"
+                            View="{Binding View}"
+                            Selected="{Binding Selected, Mode=TwoWay}" />
+        <StackPanel IsVisible="{Binding IsBusy}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Spacing="10" Margin="20">
+          <ProgressBar IsIndeterminate="True" Width="220" />
+          <TextBlock Text="{Binding Status}" HorizontalAlignment="Center" TextAlignment="Center"
+                     TextWrapping="Wrap" MaxWidth="420" />
+        </StackPanel>
+      </Panel>
+
+      <GridSplitter x:Name="RightSplitter" Grid.Column="3" ResizeDirection="Columns" />
+
+      <!-- ===== Right: details of the selected item ===== -->
+      <ScrollViewer x:Name="DetailsPanel" Grid.Column="4" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="12" Spacing="6">
+          <TextBlock Text="{Binding SelectedTitle}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
+          <TextBlock Text="{Binding SelectedDetails}" Opacity="0.75" TextWrapping="Wrap" />
+
+          <WrapPanel IsVisible="{Binding HasSelection}" Margin="0,4,0,0">
+            <Button Content="Open in editor" Click="OnOpenClick" Margin="0,0,6,6" />
+            <Button Content="Focus on this" Click="OnFocusClick" Margin="0,0,6,6"
+                    ToolTip.Tip="Show only this and what it's directly connected to" />
+            <Button Content="Start a path here" Click="OnStartPathClick" Margin="0,0,6,6"
+                    ToolTip.Tip="Find the chain of calls from this to something else" />
+          </WrapPanel>
+
+          <!-- Call path finder -->
+          <Border IsVisible="{Binding HasPathStart}" CornerRadius="6" Padding="10" Margin="0,4,0,0"
+                  Background="#1A808080" BorderBrush="#E09A3A" BorderThickness="1">
+            <StackPanel Spacing="6">
+              <TextBlock Text="{Binding PathStartText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding PathSummary}" TextWrapping="Wrap" Opacity="0.85" />
+              <WrapPanel>
+                <Button Content="Find path to selected" Click="OnFindPathClick" IsEnabled="{Binding CanFindPath}"
+                        Classes="accent" Margin="0,0,6,4" />
+                <Button Content="Clear path" Click="OnClearPathClick" Margin="0,0,6,4" />
+              </WrapPanel>
+              <ListBox ItemsSource="{Binding PathSteps}" IsVisible="{Binding HasPathSteps}" MaxHeight="240"
+                       SelectionChanged="OnPathStepSelectionChanged">
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <StackPanel ToolTip.Tip="Click to select it">
+                      <TextBlock Text="{Binding Text}" TextWrapping="Wrap" />
+                      <TextBlock Text="{Binding Where}" FontSize="11" Opacity="0.65" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </StackPanel>
+          </Border>
+
+          <!-- Code preview -->
+          <TextBlock Text="{Binding PreviewHeader}" FontWeight="SemiBold" Margin="0,8,0,0"
+                     IsVisible="{Binding HasPreview}" />
+          <Border IsVisible="{Binding HasPreview}" CornerRadius="6" Padding="8"
+                  Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" MaxHeight="360">
+              <SelectableTextBlock Text="{Binding CodePreview}" FontSize="12"
+                                   FontFamily="Cascadia Mono, Consolas, Menlo, Courier New, monospace" />
+            </ScrollViewer>
+          </Border>
+
+          <TextBlock Text="{Binding UsesHeader}" FontWeight="SemiBold" Margin="0,8,0,0"
+                     IsVisible="{Binding HasSelection}" />
+          <ListBox ItemsSource="{Binding Uses}" MaxHeight="280" IsVisible="{Binding HasSelection}"
+                   SelectionChanged="OnLinkSelectionChanged">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <StackPanel ToolTip.Tip="Click to jump to it">
+                  <TextBlock Text="{Binding Text}" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding Where}" FontSize="11" Opacity="0.65" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <TextBlock Text="{Binding UsedByHeader}" FontWeight="SemiBold" Margin="0,8,0,0"
+                     IsVisible="{Binding HasSelection}" />
+          <ListBox ItemsSource="{Binding UsedBy}" MaxHeight="280" IsVisible="{Binding HasSelection}"
+                   SelectionChanged="OnLinkSelectionChanged">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <StackPanel ToolTip.Tip="Click to jump to it">
+                  <TextBlock Text="{Binding Text}" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding Where}" FontSize="11" Opacity="0.65" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <TextBlock Opacity="0.6" FontSize="12" TextWrapping="Wrap" Margin="0,14,0,0"
+                     Text="Scroll to zoom · drag the background to pan · drag a dot to move it · click to highlight its connections · double-click to open the code · right-click to clear. To trace how one thing reaches another: select it, press Start a path here, select the other, then Find path to selected." />
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+  </DockPanel>
+</Window>

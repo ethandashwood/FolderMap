@@ -135,6 +135,24 @@ public sealed class FolderNode : FsNode
 
     public IEnumerable<FsNode> Children => Folders.Cast<FsNode>().Concat(Files);
 
+    /// <summary>
+    /// The tree view can't handle tens of thousands of children under one folder (it freezes),
+    /// so it shows the largest few hundred plus a "more" line. The list on the right shows all.
+    /// </summary>
+    public const int MaxTreeChildren = 500;
+
+    public IEnumerable<object> TreeChildren => Folders.Count <= MaxTreeChildren
+        ? Folders // the live collection, so the tree updates when folders are added or removed
+        : Folders.Take(MaxTreeChildren).Cast<object>()
+            .Append(new MoreFoldersItem(this, Folders.Count - MaxTreeChildren))
+            .ToList();
+
+    private void TreeChildrenMayHaveChanged(int countBefore)
+    {
+        if (countBefore > MaxTreeChildren || Folders.Count > MaxTreeChildren)
+            OnPropertyChanged(nameof(TreeChildren));
+    }
+
     /// <summary>Every file below this folder (non-recursive walk, safe for very deep trees).</summary>
     public IEnumerable<FileNode> AllFiles()
     {
@@ -194,8 +212,10 @@ public sealed class FolderNode : FsNode
         long size = child.Size;
         long files = child is FolderNode fn ? fn.FileCount : 1;
 
+        int foldersBefore = Folders.Count;
         if (child is FolderNode folder) Folders.Remove(folder);
         else Files.Remove((FileNode)child);
+        TreeChildrenMayHaveChanged(foldersBefore);
 
         for (var p = this; p != null; p = p.Parent)
         {
@@ -209,11 +229,13 @@ public sealed class FolderNode : FsNode
     public void Add(FsNode child)
     {
         child.Parent = this;
+        int foldersBefore = Folders.Count;
         if (child is FolderNode folder)
         {
             int i = 0;
             while (i < Folders.Count && Folders[i].Size >= folder.Size) i++;
             Folders.Insert(i, folder);
+            TreeChildrenMayHaveChanged(foldersBefore);
         }
         else
         {
@@ -230,6 +252,21 @@ public sealed class FolderNode : FsNode
             p.FileCount += files;
         }
     }
+}
+
+/// <summary>The "… 19,500 more folders" line at the end of a very long branch in the tree.</summary>
+public sealed class MoreFoldersItem
+{
+    public MoreFoldersItem(FolderNode parent, int count)
+    {
+        Parent = parent;
+        Count = count;
+    }
+
+    public FolderNode Parent { get; }
+    public int Count { get; }
+    public string Text => $"… {Count:N0} smaller folders (see the list on the right)";
+    public bool IsExpanded { get; set; } // the tree's style binds this on every item
 }
 
 /// <summary>One row in the Duplicates tab.</summary>

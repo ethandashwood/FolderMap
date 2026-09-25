@@ -17,6 +17,41 @@ The bar at the bottom works on whatever is selected in any tab: **Open**, **Show
 Explorer**, **Show in tree**, **Rename**, **Move to…** and **Recycle**. Recycle sends
 things to the Recycle Bin and never deletes them permanently.
 
+### Code map
+
+Select a folder that contains code (or a single code file) and press **Analyse code**.
+A new window opens showing how the methods, functions, variables and classes in that
+code are connected:
+
+- **Graph:** each dot is a method, variable or class. Arrows show what **calls**,
+  **creates**, **reads** or **writes** what, and members of the same class cluster together.
+  Scroll to zoom, drag to pan, drag a dot to move it, click to highlight its connections,
+  and double-click to open the code at that line (in VS Code if it's installed).
+- **List (left):** everything found, searchable by name or file.
+- **Details (right):** for the selected item, what it uses and what uses it. Click any
+  entry to jump to it.
+- **Focus:** "Selected + neighbours" or "+ 2 steps" shows only the code around the
+  selection, which is the best way to explore a big project.
+- **Code preview:** the selected method's code is shown in the details panel, with line
+  numbers, so you can read it without leaving the map.
+- **Possibly unused:** switch the list to "Possibly unused" to see methods nothing calls and
+  variables nothing reads (they also get a dashed orange ring in the graph). Things used by
+  frameworks are left out: attributes like `[Fact]`, overrides, interface methods, Python
+  decorators and `__dunder__` methods, JS exports, and names used in XAML/HTML files.
+  It's a hint, not a verdict: code outside the folder or reflection can still use them.
+- **Call paths:** select something, press **Start a path here**, select something else and
+  press **Find path to selected**. You get the shortest chain of calls between them, step by
+  step, and the graph shows just that chain.
+
+| Language | How it's analysed |
+|---|---|
+| C# | Accurately, with Roslyn (the real C# compiler), so overloads, partial classes and same-named members are told apart |
+| Java, Kotlin | By pattern matching, with class-aware rules: `count` or `save()` inside a class means that class's own field or method. `@Override`, `@Test`-style annotations, interface methods and `main` count as used. Usually right, but calls through inheritance or reflection can be missed |
+| Python, JavaScript, TypeScript | By pattern matching. Usually right, but dynamic calls can be missed and methods that share a name elsewhere aren't linked |
+
+`bin`, `obj`, `node_modules`, `.git`, virtual environments and build output (including Maven `target` and `.gradle`) are skipped,
+and up to 3,000 files are analysed.
+
 ## Running it
 
 1. Install the **.NET SDK** (8 or newer): https://dotnet.microsoft.com/download
@@ -42,6 +77,11 @@ Open the folder in **Visual Studio 2022** or **JetBrains Rider**, or open
 `FolderMap.csproj` in **VS Code** with the C# Dev Kit extension. For XAML previews,
 install the Avalonia extension for your editor.
 
+## Testing
+
+Run the automated tests with `dotnet test tests/FolderMap.Tests`. [TESTING.md](TESTING.md)
+explains what they cover, and has a checklist of tricky situations to try by hand.
+
 ## How the code is organised
 
 ```
@@ -52,6 +92,13 @@ Services/FileOps.cs        Open / reveal / rename / move / recycle
 Controls/ZoomableChart     Shared base: wheel zoom, drag-to-pan, click handling
 Controls/TreemapControl    Squarified treemap, 3 levels deep (more as you zoom)
 Controls/SunburstControl   Ring chart, 5 levels deep
+Controls/CodeGraphControl  Force-directed code graph (Code map window)
+Models/CodeGraph.cs        CodeSymbol / CodeLink: methods, variables and how they connect
+Services/CodeAnalyzer.cs   Finds code files, picks the analyser per language
+Services/CSharpCodeAnalyzer.cs   Roslyn-based C# analysis
+Services/PatternCodeAnalyzer.cs  Pattern-based Python, JS/TS, Java and Kotlin analysis
+ViewModels/CodeMapViewModel      Filters, focus mode and details for the Code map
+Views/CodeMapWindow.axaml        The Code map window
 ViewModels/MainViewModel   All app state and commands (CommunityToolkit.Mvvm)
 Views/MainWindow.axaml     The UI layout
 Views/MainWindow.axaml.cs  Folder pickers, dialogs, selection syncing
