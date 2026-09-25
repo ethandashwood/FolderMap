@@ -240,3 +240,56 @@ public sealed class GraphView
     public IReadOnlyList<CodeSymbol> Nodes { get; }
     public IReadOnlyList<CodeLink> Links { get; }
 }
+
+/// <summary>One file ("script") in the Boxes view, with the classes, methods and variables it contains.</summary>
+public sealed class FileBox
+{
+    public FileBox(string file, string folder, string language)
+    {
+        File = file;
+        Folder = folder;
+        Language = language;
+    }
+
+    public string File { get; }
+    public string Name => Path.GetFileName(File);
+    /// <summary>Folder relative to the analysed folder ("" for the top level).</summary>
+    public string Folder { get; }
+    public string Language { get; }
+
+    /// <summary>Rows shown in the box: classes, each followed by its members, then everything else.</summary>
+    public List<CodeSymbol> Rows { get; } = new();
+    /// <summary>How many more symbols the file has than fit in the box.</summary>
+    public int HiddenRows { get; internal set; }
+    public int SymbolCount { get; internal set; }
+
+    // ----- layout state, used only by FileBoxesControl -----
+    internal double X, Y, W, H;
+
+    public override string ToString() => Name;
+}
+
+/// <summary>"File A uses file B" - every call / creation / read / write from A's code into B's.</summary>
+public sealed class FileEdge
+{
+    public FileEdge(FileBox from, FileBox to)
+    {
+        From = from;
+        To = to;
+    }
+
+    public FileBox From { get; }
+    public FileBox To { get; }
+    public List<CodeLink> Links { get; } = new();
+    public int Count => Links.Sum(l => l.Count);
+}
+
+/// <summary>Everything the Boxes view draws.</summary>
+public sealed class FileMap
+{
+    public List<FileBox> Boxes { get; } = new();
+    public List<FileEdge> Edges { get; } = new();
+
+    public FileBox? BoxOf(CodeSymbol symbol) =>
+        Boxes.FirstOrDefault(b => string.Equals(b.File, symbol.File, StringComparison.OrdinalIgnoreCase));
+}

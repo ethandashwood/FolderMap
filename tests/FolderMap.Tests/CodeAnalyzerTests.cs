@@ -757,4 +757,70 @@ public class CodeAnalyzerTests
 
         Assert.Equal(new[] { "App.java" }, CodeAnalyzer.CodeFilesIn(root).Select(f => f.Name));
     }
+
+    // ---------------------------------------------------------------- Boxes view (one box per file)
+
+    [Fact]
+    public async Task Boxes_view_has_one_box_per_file_and_arrows_between_them()
+    {
+        using var t = new TempFolder();
+        var app = t.Text("app.py", "from helpers import greet\n\ndef main():\n    greet()\n    greet()\n\nmain()\n");
+        var helpers = t.Text("lib/helpers.py", "def greet():\n    print('hi')\n\ndef unused():\n    pass\n");
+        var vm = new CodeMapViewModel(t.Path, new[] { app, helpers }, null);
+        await vm.LoadAsync();
+
+        vm.ViewKind = 1;
+
+        var map = vm.FileMap!;
+        Assert.Equal(2, map.Boxes.Count);
+        var edge = Assert.Single(map.Edges);
+        Assert.Equal("app.py", edge.From.Name);
+        Assert.Equal("helpers.py", edge.To.Name);
+        Assert.Equal(2, edge.Count); // greet() is called twice
+        var helpersBox = map.Boxes.Single(b => b.Name == "helpers.py");
+        Assert.Equal("lib", helpersBox.Folder);
+        Assert.Equal(new[] { "greet", "unused" }, helpersBox.Rows.Select(r => r.Name));
+    }
+
+    [Fact]
+    public async Task Box_rows_list_classes_with_their_members_and_cap_long_files()
+    {
+        using var t = new TempFolder();
+        var shop = t.Text("shop.py", "def helper():\n    pass\n\nclass Shop:\n    def buy(self):\n        pass\n");
+        var many = t.Text("many.py", string.Concat(Enumerable.Range(1, 20).Select(i => $"def f{i}():\n    pass\n\n")));
+        var vm = new CodeMapViewModel(t.Path, new[] { shop, many }, null);
+        await vm.LoadAsync();
+
+        vm.ViewKind = 1;
+
+        var shopBox = vm.FileMap!.Boxes.Single(b => b.Name == "shop.py");
+        Assert.Equal(new[] { "Shop", "buy", "helper" }, shopBox.Rows.Select(r => r.Name));
+        var manyBox = vm.FileMap.Boxes.Single(b => b.Name == "many.py");
+        Assert.Equal(CodeMapViewModel.MaxRowsPerBox, manyBox.Rows.Count);
+        Assert.Equal(20 - CodeMapViewModel.MaxRowsPerBox, manyBox.HiddenRows);
+    }
+
+    [Fact]
+    public async Task Boxes_view_focus_mode_shows_only_nearby_files()
+    {
+        using var t = new TempFolder();
+        var files = new[]
+        {
+            t.Text("a.py", "def fa():\n    fb()\n"),
+            t.Text("b.py", "def fb():\n    fc()\n"),
+            t.Text("c.py", "def fc():\n    pass\n"),
+            t.Text("d.py", "def fd():\n    pass\n"),
+        };
+        var vm = new CodeMapViewModel(t.Path, files, null);
+        await vm.LoadAsync();
+        vm.ViewKind = 1;
+        Assert.Equal(4, vm.FileMap!.Boxes.Count);
+
+        vm.Selected = vm.ListItems.Single(s => s.Name == "fa");
+        vm.FocusMode = 1;
+        Assert.Equal(new[] { "a.py", "b.py" }, vm.FileMap!.Boxes.Select(b => b.Name).OrderBy(n => n));
+
+        vm.FocusMode = 2;
+        Assert.Equal(new[] { "a.py", "b.py", "c.py" }, vm.FileMap!.Boxes.Select(b => b.Name).OrderBy(n => n));
+    }
 }

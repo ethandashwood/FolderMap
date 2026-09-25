@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using FolderMap.Models;
 using FolderMap.Services;
@@ -133,6 +134,24 @@ public partial class MainWindow : Window
             catch { /* not realised yet - harmless */ }
             finally { _syncingTree = false; }
         }, DispatcherPriority.Background);
+    }
+
+    // ---------- theme ----------
+
+    /// <summary>
+    /// Switches the whole app between following Windows, light and dark. Setting it on the
+    /// Application (not this window) means open Code map windows switch too.
+    /// </summary>
+    private void OnThemeChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        // Use the sender: this also fires while the window is loading, before ThemePicker is set.
+        if (Application.Current is not { } app || sender is not ComboBox picker) return;
+        app.RequestedThemeVariant = picker.SelectedIndex switch
+        {
+            1 => ThemeVariant.Light,
+            2 => ThemeVariant.Dark,
+            _ => ThemeVariant.Default, // follow the Windows setting
+        };
     }
 
     // ---------- scanning ----------

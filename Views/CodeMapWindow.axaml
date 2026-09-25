@@ -18,7 +18,12 @@
           <TextBlock Text="{Binding Summary}" FontSize="12" Opacity="0.75" TextTrimming="CharacterEllipsis"
                      ToolTip.Tip="{Binding Summary}" />
         </StackPanel>
-        <WrapPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right" MaxWidth="720">
+        <WrapPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right" MaxWidth="900">
+          <ComboBox SelectedIndex="{Binding ViewKind, Mode=TwoWay}" Width="190" Margin="0,2,10,2"
+                    ToolTip.Tip="Dots: every method and variable. Boxes: one box per file (script) with arrows between files.">
+            <ComboBoxItem Content="View: dots" />
+            <ComboBoxItem Content="View: boxes (per file)" />
+          </ComboBox>
           <ComboBox SelectedIndex="{Binding FocusMode, Mode=TwoWay}" Width="200" Margin="0,2,10,2"
                     ToolTip.Tip="Show the whole program, or only what's connected to the selected item">
             <ComboBoxItem Content="Show everything" />
@@ -80,7 +85,12 @@
       <Panel Grid.Column="2" MinWidth="200">
         <c:CodeGraphControl x:Name="Graph"
                             View="{Binding View}"
-                            Selected="{Binding Selected, Mode=TwoWay}" />
+                            Selected="{Binding Selected, Mode=TwoWay}"
+                            IsVisible="{Binding IsDotsView}" />
+        <c:FileBoxesControl x:Name="Boxes"
+                            Map="{Binding FileMap}"
+                            Selected="{Binding Selected, Mode=TwoWay}"
+                            IsVisible="{Binding IsBoxesView}" />
         <StackPanel IsVisible="{Binding IsBusy}" HorizontalAlignment="Center" VerticalAlignment="Center"
                     Spacing="10" Margin="20">
           <ProgressBar IsIndeterminate="True" Width="220" />

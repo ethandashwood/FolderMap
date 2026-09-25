@@ -21,6 +21,7 @@ public partial class CodeMapWindow : Window
         InitializeComponent();
 
         Graph.SymbolDoubleClicked += (_, symbol) => OpenInEditor(symbol);
+        Boxes.OpenRequested += (_, target) => OpenInEditor(target.File, target.Line);
         Opened += async (_, _) =>
         {
             ApplyLayout(ClientSize);
@@ -83,7 +84,11 @@ public partial class CodeMapWindow : Window
 
     private void OnClearPathClick(object? sender, RoutedEventArgs e) => Vm.ClearPath();
 
-    private void OnFitClick(object? sender, RoutedEventArgs e) => Graph.FitToView();
+    private void OnFitClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm.IsBoxesView) Boxes.FitToView();
+        else Graph.FitToView();
+    }
 
     private void OnFocusClick(object? sender, RoutedEventArgs e)
     {
@@ -95,11 +100,13 @@ public partial class CodeMapWindow : Window
         if (Vm.Selected is { } symbol) OpenInEditor(symbol);
     }
 
-    private async void OpenInEditor(CodeSymbol symbol)
+    private void OpenInEditor(CodeSymbol symbol) => OpenInEditor(symbol.File, symbol.Line);
+
+    private async void OpenInEditor(string file, int line)
     {
         try
         {
-            FileOps.OpenInEditor(symbol.File, symbol.Line);
+            FileOps.OpenInEditor(file, line);
         }
         catch (Exception ex)
         {

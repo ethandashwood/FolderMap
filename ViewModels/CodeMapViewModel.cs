@@ -77,6 +77,22 @@ public partial class CodeMapViewModel : ObservableObject
     /// <summary>What the graph control draws.</summary>
     [ObservableProperty] private GraphView? _view;
 
+    /// <summary>0 = dots (methods and variables), 1 = boxes (one per file).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsDotsView), nameof(IsBoxesView))]
+    private int _viewKind;
+
+    public bool IsDotsView => ViewKind == 0;
+    public bool IsBoxesView => ViewKind == 1;
+
+    /// <summary>What the Boxes view draws.</summary>
+    [ObservableProperty] private FileMap? _fileMap;
+
+    private const int MaxBoxes = 120;     // more files than this gets unreadable
+    internal const int MaxRowsPerBox = 14;
+
+    partial void OnViewKindChanged(int value) => RebuildFileMap();
+
     // ---------- filters ----------
 
     [ObservableProperty] private string _searchText = "";
@@ -100,12 +116,18 @@ public partial class CodeMapViewModel : ObservableObject
     partial void OnShowVariablesChanged(bool value) => FiltersChanged();
     partial void OnShowClassesChanged(bool value) => FiltersChanged();
     partial void OnShowUnconnectedChanged(bool value) => RebuildView();
-    partial void OnFocusModeChanged(int value) => RebuildView();
+
+    partial void OnFocusModeChanged(int value)
+    {
+        RebuildView();
+        RebuildFileMap();
+    }
 
     private void FiltersChanged()
     {
         RefreshList();
         RebuildView();
+        RebuildFileMap();
     }
 
     // ---------- selection + details ----------
@@ -160,6 +182,9 @@ public partial class CodeMapViewModel : ObservableObject
         // selected item is actually on screen.
         if (FocusMode > 0 || (value != null && View != null && !View.Nodes.Contains(value)))
             RebuildView();
+        // Boxes follow the selection in focus mode, and a selected member hidden in "+N more" gets shown.
+        if (FocusMode > 0 || (value != null && FileMap?.BoxOf(value) is { } box && !box.Rows.Contains(value)))
+            RebuildFileMap();
     }
 
     // =====================================================================
@@ -217,6 +242,7 @@ public partial class CodeMapViewModel : ObservableObject
         }
 
         RebuildView();
+        RebuildFileMap();
     }
 
     public void Cancel() => _cts.Cancel();
@@ -306,6 +332,133 @@ public partial class CodeMapViewModel : ObservableObject
 
         View = new GraphView(nodes.ToList(), links);
         ViewNote = note.Length > 0 ? note : $"{nodes.Count:N0} items · {links.Count:N0} connections";
+    }
+
+    // =====================================================================
+    // Boxes view: one box per file, arrows for how files use each other
+    // =====================================================================
+
+    private void RebuildFileMap()
+    {
+        if (_graph is null || _suspendRebuild || ViewKind != 1) return;
+
+        // Every file's symbols, in file order.
+        var byFile = _graph.Symbols
+            .GroupBy(s => s.File, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.OrderBy(s => s.Line).ToList(), StringComparer.OrdinalIgnoreCase);
+
+        // File-to-file connections (class membership isn't a connection between files).
+        var fileLinks = _graph.Links
+            .Where(l => l.Kind != LinkKind.Contains &&
+                        !string.Equals(l.From.File, l.To.File, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(l => (From: l.From.File.ToLowerInvariant(), To: l.To.File.ToLowerInvariant()))
+            .ToList();
+
+        // Which files to show.
+        HashSet<string> files;
+        string note;
+        if (FocusMode > 0 && Selected != null)
+        {
+            files = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Selected.File };
+            var frontier = new List<string> { Selected.File };
+            for (int step = 0; step < FocusMode; step++)
+            {
+                var next = new List<string>();
+                foreach (var group in fileLinks)
+                {
+                    var from = group.First().From.File;
+                    var to = group.First().To.File;
+                    if (frontier.Contains(from, StringComparer.OrdinalIgnoreCase) && files.Add(to)) next.Add(to);
+                    if (frontier.Contains(to, StringComparer.OrdinalIgnoreCase) && files.Add(from)) next.Add(from);
+                }
+                frontier = next;
+            }
+            note = $"{Selected.FileName} and the files within {FocusMode} step{(FocusMode > 1 ? "s" : "")} of it";
+        }
+        else
+        {
+            var all = byFile.Keys.ToList();
+            if (all.Count > MaxBoxes)
+            {
+                var degree = all.ToDictionary(f => f, _ => 0, StringComparer.OrdinalIgnoreCase);
+                foreach (var group in fileLinks)
+                {
+                    degree[group.First().From.File] += group.Count();
+                    degree[group.First().To.File] += group.Count();
+                }
+                files = all.OrderByDescending(f => degree[f]).Take(MaxBoxes).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                note = $"Showing the {MaxBoxes} most connected of {all.Count:N0} files. Select something and use a focus mode to see the rest.";
+            }
+            else
+            {
+                files = all.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                note = "";
+            }
+            if (Selected != null) files.Add(Selected.File);
+        }
+
+        var map = new FileMap();
+        var boxes = new Dictionary<string, FileBox>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in files.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!byFile.TryGetValue(file, out var symbols)) continue;
+            var box = new FileBox(file, RelativeFolder(file), symbols[0].Language);
+            FillRows(box, symbols);
+            boxes[file] = box;
+            map.Boxes.Add(box);
+        }
+
+        foreach (var group in fileLinks)
+        {
+            var first = group.First();
+            if (!boxes.TryGetValue(first.From.File, out var a) || !boxes.TryGetValue(first.To.File, out var b)) continue;
+            var edge = new FileEdge(a, b);
+            edge.Links.AddRange(group);
+            map.Edges.Add(edge);
+        }
+
+        FileMap = map;
+        ViewNote = note.Length > 0 ? note
+            : $"{map.Boxes.Count:N0} files · {map.Edges.Count:N0} file-to-file connections · drag a box to move it";
+    }
+
+    /// <summary>Classes first, each followed by its own members, then functions and variables.</summary>
+    private void FillRows(FileBox box, List<CodeSymbol> symbols)
+    {
+        var visible = symbols.Where(KindVisible).ToList();
+        var ordered = new List<CodeSymbol>();
+        var classes = visible.Where(s => s.Kind == CodeKind.Class).ToList();
+        var used = new HashSet<CodeSymbol>();
+        foreach (var cls in classes)
+        {
+            ordered.Add(cls);
+            used.Add(cls);
+            foreach (var member in visible.Where(s => s.Container == cls.Name && s.Kind != CodeKind.Class))
+                if (used.Add(member)) ordered.Add(member);
+        }
+        foreach (var s in visible)
+            if (used.Add(s)) ordered.Add(s);
+
+        box.SymbolCount = symbols.Count;
+        var shown = ordered.Take(MaxRowsPerBox).ToList();
+        // Never hide the selected item.
+        if (Selected != null && ordered.Contains(Selected) && !shown.Contains(Selected))
+            shown[^1] = Selected;
+        box.Rows.AddRange(shown);
+        box.HiddenRows = ordered.Count - shown.Count;
+    }
+
+    private string RelativeFolder(string file)
+    {
+        try
+        {
+            var folder = Path.GetRelativePath(FolderPath, Path.GetDirectoryName(file) ?? "");
+            return folder == "." ? "" : folder;
+        }
+        catch (ArgumentException)
+        {
+            return "";
+        }
     }
 
     private void UpdateDetails()
@@ -420,6 +573,7 @@ public partial class CodeMapViewModel : ObservableObject
     {
         if (PathStart is not { } start || Selected is not { } end || ReferenceEquals(start, end)) return;
 
+        ViewKind = 0; // paths are shown in the dots view
         var path = CodeGraph.FindPath(start, end);
         string intro;
         if (path != null)

@@ -39,6 +39,12 @@ code are connected:
   frameworks are left out: attributes like `[Fact]`, overrides, interface methods, Python
   decorators and `__dunder__` methods, JS exports, and names used in XAML/HTML files.
   It's a hint, not a verdict: code outside the folder or reflection can still use them.
+- **Boxes view:** switch the "View" dropdown to **boxes (per file)** to see each script as a
+  box listing its classes, methods and variables, with arrows between files showing which
+  files use which (the number on each arrow is how many times). Files that use others sit
+  above the files they use. Hover an arrow to see exactly which code connects the two files,
+  click a row to select it (its connections light up in the other boxes), drag a box's title
+  to move it, and double-click to open the code.
 - **Call paths:** select something, press **Start a path here**, select something else and
   press **Find path to selected**. You get the shortest chain of calls between them, step by
   step, and the graph shows just that chain.
@@ -92,7 +98,8 @@ Services/FileOps.cs        Open / reveal / rename / move / recycle
 Controls/ZoomableChart     Shared base: wheel zoom, drag-to-pan, click handling
 Controls/TreemapControl    Squarified treemap, 3 levels deep (more as you zoom)
 Controls/SunburstControl   Ring chart, 5 levels deep
-Controls/CodeGraphControl  Force-directed code graph (Code map window)
+Controls/CodeGraphControl  Force-directed code graph (Code map window, dots view)
+Controls/FileBoxesControl  One box per file with arrows between files (Code map window, boxes view)
 Models/CodeGraph.cs        CodeSymbol / CodeLink: methods, variables and how they connect
 Services/CodeAnalyzer.cs   Finds code files, picks the analyser per language
 Services/CSharpCodeAnalyzer.cs   Roslyn-based C# analysis

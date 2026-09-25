@@ -34,7 +34,7 @@
     <!-- ===== Top bar: choose and scan a folder ===== -->
     <Border DockPanel.Dock="Top" Padding="12,10"
             Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
-      <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
         <TextBlock Text="Folder" VerticalAlignment="Center" Margin="0,0,10,0" FontWeight="SemiBold" />
         <TextBox Grid.Column="1" Text="{Binding ScanPath, Mode=TwoWay}"
                  Watermark="e.g. C:\ or C:\Users\Ethan" IsEnabled="{Binding IsIdle}" />
@@ -44,6 +44,13 @@
                 Command="{Binding ScanCommand}" IsEnabled="{Binding IsIdle}" />
         <Button Grid.Column="4" Content="Cancel" Margin="8,0,0,0"
                 Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" />
+        <!-- Light / dark: applies to every window, including open Code maps -->
+        <ComboBox Grid.Column="5" x:Name="ThemePicker" SelectedIndex="0" Width="150" Margin="8,0,0,0"
+                  VerticalAlignment="Center" SelectionChanged="OnThemeChanged" ToolTip.Tip="Theme">
+          <ComboBoxItem Content="Match Windows" />
+          <ComboBoxItem Content="Light" />
+          <ComboBoxItem Content="Dark" />
+        </ComboBox>
       </Grid>
     </Border>
 

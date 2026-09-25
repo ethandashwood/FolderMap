@@ -88,6 +88,8 @@ Work through these with the app running. Write the result next to each one.
 | C10 | Find a path between two unrelated things | A clear "nothing connects them" message. Nothing breaks. |
 | C11 | Analyse a Java project (e.g. a Maven or Minecraft-mod folder) | Classes, methods and fields appear. Constructors show as teal dots. `target/` and `.gradle/` are skipped. `@Override` methods aren't listed as unused. |
 | C12 | Analyse a Kotlin / Android project | `fun`s, `val`/`var` properties and `companion object` members show up under their class. `onCreate`-style methods aren't listed as unused. |
+| C13 | In the Code map, switch View to "boxes (per file)" | One box per file, callers above the files they use, arrows with counts. Hover an arrow: a list of which methods connect the two files. |
+| C14 | In the boxes view: click a method, drag a box by its title, double-click a method, switch the theme | Its row turns orange and connected rows in other boxes light up; the box moves and stays put; the code opens; the boxes switch between light and dark colours. |
 
 ## 3. Known limitations (by design)
 
